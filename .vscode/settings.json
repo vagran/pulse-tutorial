@@ -1,0 +1,34 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}",
+    "cmake.configureArgs": [
+        // "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/arm-gcc-toolchain.cmake"
+        "-DCMAKE_TOOLCHAIN_FILE=${workspaceFolder}/arm-clang-toolchain.cmake"
+    ],
+    "cSpell.words": [
+        "AHBCLK",
+        "coro",
+        "Deschedule",
+        "EXTI",
+        "GPIOA",
+        "GPIOC",
+        "GPIOD",
+        "HCLK",
+        "huart",
+        "HWCONTROL",
+        "IWDG",
+        "MALLOC",
+        "NVIC",
+        "OSCILLATORTYPE",
+        "PCCARD",
+        "PCLK",
+        "PLLCLK",
+        "PLLMUL",
+        "PLLSOURCE",
+        "RXNE",
+        "SMARTCARD",
+        "SYSCLK",
+        "SYSCLKSOURCE",
+        "USART",
+        "WWDG"
+    ]
+}
