@@ -1,0 +1,17 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Upload firmware",
+            "type": "shell",
+            "command": "st-flash --connect-under-reset write ${workspaceFolder}/build/firmware.bin 0x08000000"
+        },
+        {
+            "label": "Reset MCU",
+            "type": "shell",
+            "command": "st-flash --connect-under-reset reset"
+        }
+    ]
+}

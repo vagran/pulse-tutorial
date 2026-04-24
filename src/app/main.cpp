@@ -121,25 +121,97 @@ InitRotaryEncoder()
     init.Pull = GPIO_PULLUP;
 
     HAL_GPIO_Init(ioRotEncB.Port(), &init);
+
+    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 8, 0);
+    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }
 
-// void
-// LedOn()
-// {
-//     HAL_GPIO_WritePin(ioLed.Port(), ioLed.pin, GPIO_PIN_RESET);
-// }
+void
+LedOn()
+{
+    HAL_GPIO_WritePin(ioLed.Port(), ioLed.pin, GPIO_PIN_RESET);
+}
 
-// void
-// LedOff()
-// {
-//     HAL_GPIO_WritePin(ioLed.Port(), ioLed.pin, GPIO_PIN_SET);
-// }
+void
+LedOff()
+{
+    HAL_GPIO_WritePin(ioLed.Port(), ioLed.pin, GPIO_PIN_SET);
+}
 
 // void
 // LedToggle()
 // {
 //     HAL_GPIO_TogglePin(ioLed.Port(), ioLed.pin);
 // }
+
+
+TIM_HandleTypeDef hTim3;
+uint16_t curBrightness = 0;
+
+void
+InitPwm()
+{
+    __HAL_RCC_TIM3_CLK_ENABLE();
+
+    hTim3.Instance = TIM3;
+    hTim3.Init.Prescaler = 72 - 1;     // 72 MHz / 72 = 1 MHz
+    hTim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+    hTim3.Init.Period = 1000 - 1;      // 1 kHz period
+    hTim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+
+    HAL_TIM_Base_Init(&hTim3);
+    HAL_TIM_OC_Init(&hTim3);
+
+    TIM_OC_InitTypeDef sConfig = {0};
+    // Do not control pin directly
+    sConfig.OCMode = TIM_OCMODE_TIMING;
+    sConfig.Pulse = curBrightness;
+    sConfig.OCPolarity = TIM_OCPOLARITY_HIGH;
+
+    HAL_TIM_OC_ConfigChannel(&hTim3, &sConfig, TIM_CHANNEL_1);
+
+    HAL_TIM_Base_Start_IT(&hTim3);
+    HAL_TIM_OC_Start_IT(&hTim3, TIM_CHANNEL_1);
+
+    HAL_NVIC_SetPriority(TIM3_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(TIM3_IRQn);
+}
+
+void
+SetPwm(uint16_t value)
+{
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-volatile"
+    __HAL_TIM_SET_COMPARE(&hTim3, TIM_CHANNEL_1, value);
+#pragma GCC diagnostic pop
+}
+
+extern "C" void
+HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *hTim)
+{
+    if (hTim->Instance == TIM2) {
+        HAL_IncTick();
+        PulseTimerTick();
+    } else if (hTim->Instance == TIM3) {
+        if (curBrightness != 0) {
+            LedOn();
+        }
+    }
+}
+
+extern "C" void
+HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *hTim)
+{
+    if (hTim->Instance == TIM3 && hTim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
+        LedOff();
+    }
+}
+
+extern "C" void
+TIM3_IRQHandler(void)
+{
+    HAL_TIM_IRQHandler(&hTim3);
+}
 
 
 class RotaryEncoder {
@@ -272,8 +344,15 @@ RotaryEncoderTask()
 {
 
     while (true) {
-        int8_t clicks PULSE_UNUSED = co_await rotEnc.WaitClick();
-        //XXX
+        int16_t clicks PULSE_UNUSED = co_await rotEnc.WaitClick();
+        int16_t newBrightness = static_cast<int16_t>(curBrightness) + (clicks << 3);
+        if (newBrightness < 0) {
+            newBrightness = 0;
+        } else if (newBrightness > 999) {
+            newBrightness = 999;
+        }
+        curBrightness = newBrightness;
+        SetPwm(curBrightness);
     }
 }
 
@@ -296,7 +375,7 @@ HAL_GPIO_EXTI_Callback(uint16_t gpioPin)
     }
 }
 
-extern "C" [[noreturn]] void
+extern "C" [[noreturn]] int
 main()
 {
     pulse_add_heap_region(heap, sizeof(heap));
@@ -305,6 +384,7 @@ main()
     SystemClock_Config();
 
     InitLed();
+    InitPwm();
     InitRotaryEncoder();
     rotEnc.Initialize();
 
