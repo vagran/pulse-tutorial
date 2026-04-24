@@ -1,0 +1,6 @@
+[submodule "modules/etl"]
+	path = modules/etl
+	url = https://github.com/ETLCPP/etl
+[submodule "modules/pulse"]
+	path = modules/pulse
+	url = git@github.com:vagran/pulse
