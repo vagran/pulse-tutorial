@@ -138,15 +138,62 @@ LedOff()
     HAL_GPIO_WritePin(ioLed.Port(), ioLed.pin, GPIO_PIN_SET);
 }
 
-// void
-// LedToggle()
-// {
-//     HAL_GPIO_TogglePin(ioLed.Port(), ioLed.pin);
-// }
-
 
 TIM_HandleTypeDef hTim3;
-uint16_t curBrightness = 0;
+constexpr int PWM_BITS = 6;
+constexpr uint8_t MAX_PWM = (1 << PWM_BITS) - 1;
+
+void
+SetPwm(uint16_t value)
+{
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-volatile"
+    __HAL_TIM_SET_COMPARE(&hTim3, TIM_CHANNEL_1, value);
+#pragma GCC diagnostic pop
+}
+
+uint16_t
+GetPwm()
+{
+    return __HAL_TIM_GET_COMPARE(&hTim3, TIM_CHANNEL_1);
+}
+
+/** Calculate PWM value from linearly perceived brightness. Perception is approximately described as
+ * `real_brightness ^ 0.33`, so just calculate `brightness ^ 3`.
+ */
+uint8_t
+CalculatePwm(uint8_t brightness)
+{
+    if (brightness == 0) {
+        return 0;
+    }
+    if (brightness >= MAX_PWM) {
+        return MAX_PWM;
+    }
+    uint32_t pwm = static_cast<uint32_t>(brightness) * static_cast<uint32_t>(brightness) *
+        static_cast<uint32_t>(brightness);
+    return pwm >> (PWM_BITS * 2);
+}
+
+/** Approximate calculation of minimal value which will result in calculated PWM value 1 to
+ * eliminate completely dark beginning.
+ */
+constexpr uint8_t MIN_BRIGHTNESS =
+    (1 << (etl::bit_width(static_cast<uint32_t>(1) << (PWM_BITS * 2)) / 3)) - 1;
+
+uint8_t curBrightness = MIN_BRIGHTNESS;
+// Limit indication in progress if not empty.
+Task indicateMaxTask;
+
+TaskV
+IndicateMaxBrightness()
+{
+    LedOff();
+    co_await Timer::Delay(etl::chrono::milliseconds(300));
+    LedOn();
+    co_await Timer::Delay(etl::chrono::milliseconds(300));
+    indicateMaxTask.ReleaseHandle();
+}
 
 void
 InitPwm()
@@ -154,18 +201,19 @@ InitPwm()
     __HAL_RCC_TIM3_CLK_ENABLE();
 
     hTim3.Instance = TIM3;
-    hTim3.Init.Prescaler = 72 - 1;     // 72 MHz / 72 = 1 MHz
+    // We need 1kHz period.
+    hTim3.Init.Prescaler = 72000000 / 1000 / (MAX_PWM + 1);
     hTim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-    hTim3.Init.Period = 1000 - 1;      // 1 kHz period
+    hTim3.Init.Period = MAX_PWM;
     hTim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
 
     HAL_TIM_Base_Init(&hTim3);
     HAL_TIM_OC_Init(&hTim3);
 
     TIM_OC_InitTypeDef sConfig = {0};
-    // Do not control pin directly
+    // Do not control pin directly, built-in LED sits on incompatible pin.
     sConfig.OCMode = TIM_OCMODE_TIMING;
-    sConfig.Pulse = curBrightness;
+    sConfig.Pulse = CalculatePwm(curBrightness);
     sConfig.OCPolarity = TIM_OCPOLARITY_HIGH;
 
     HAL_TIM_OC_ConfigChannel(&hTim3, &sConfig, TIM_CHANNEL_1);
@@ -177,15 +225,6 @@ InitPwm()
     HAL_NVIC_EnableIRQ(TIM3_IRQn);
 }
 
-void
-SetPwm(uint16_t value)
-{
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-volatile"
-    __HAL_TIM_SET_COMPARE(&hTim3, TIM_CHANNEL_1, value);
-#pragma GCC diagnostic pop
-}
-
 extern "C" void
 HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *hTim)
 {
@@ -193,7 +232,7 @@ HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *hTim)
         HAL_IncTick();
         PulseTimerTick();
     } else if (hTim->Instance == TIM3) {
-        if (curBrightness != 0) {
+        if (GetPwm() != 0 && !indicateMaxTask) {
             LedOn();
         }
     }
@@ -202,7 +241,7 @@ HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *hTim)
 extern "C" void
 HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *hTim)
 {
-    if (hTim->Instance == TIM3 && hTim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
+    if (hTim->Instance == TIM3 && hTim->Channel == HAL_TIM_ACTIVE_CHANNEL_1 && !indicateMaxTask) {
         LedOff();
     }
 }
@@ -344,15 +383,19 @@ RotaryEncoderTask()
 {
 
     while (true) {
-        int16_t clicks PULSE_UNUSED = co_await rotEnc.WaitClick();
-        int16_t newBrightness = static_cast<int16_t>(curBrightness) + (clicks << 3);
-        if (newBrightness < 0) {
-            newBrightness = 0;
-        } else if (newBrightness > 999) {
-            newBrightness = 999;
+        int16_t clicks = co_await rotEnc.WaitClick();
+        if (indicateMaxTask) {
+            continue;
+        }
+        int16_t newBrightness = static_cast<int16_t>(curBrightness) + clicks;
+        if (newBrightness < MIN_BRIGHTNESS) {
+            newBrightness = MIN_BRIGHTNESS;
+        } else if (newBrightness > MAX_PWM) {
+            newBrightness = MAX_PWM;
+            indicateMaxTask = Task::Spawn(IndicateMaxBrightness());
         }
         curBrightness = newBrightness;
-        SetPwm(curBrightness);
+        SetPwm(CalculatePwm(curBrightness));
     }
 }
 
