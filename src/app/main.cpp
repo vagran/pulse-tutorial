@@ -9,26 +9,41 @@
 #include <stm32f103xb.h>
 
 
-using namespace pulse;
-
-
 [[noreturn]] void
 Panic(const char *msg)
 {
-    pulsePort_DisableInterrupts();
+    pulse::DisableInterrupts();
     for(;;);
+
+    /* Stop in debug build, reset after delay in release build. */
+#ifdef DEBUG
+    for(;;);
+#else
+    /* Make delay before reset */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    if (DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) {
+        /* 1 second delay. */`
+        uint32_t cycles = SystemCoreClock;
+        uint32_t start = DWT->CYCCNT;
+        while ((DWT->CYCCNT - start) < cycles);
+    }
+
+    NVIC_SystemReset();
+#endif
 }
 
 void
 MallocLock()
 {
-    pulsePort_EnterCriticalSection();
+    pulse::EnterCriticalSection();
 }
 
 void
 MallocUnlock()
 {
-    pulsePort_ExitCriticalSection();
+    pulse::ExitCriticalSection();
 }
 
 namespace {
@@ -51,7 +66,7 @@ constexpr GpioLine
     ioRotEncA   DEF_IO(A, 10),
     ioRotEncB   DEF_IO(A, 11);
 
-MallocUnit heap[HEAP_UNITS_SIZE_KB(16)];
+pulse::MallocUnit heap[PULSE_HEAP_UNITS_SIZE_KB(16)];
 
 void
 SystemClock_Config(void)
@@ -140,8 +155,8 @@ LedOff()
 
 
 TIM_HandleTypeDef hTim3;
-constexpr int PWM_BITS = 6;
-constexpr uint8_t MAX_PWM = (1 << PWM_BITS) - 1;
+constexpr int PWM_BITS = 10;
+constexpr uint16_t MAX_PWM = (1 << PWM_BITS) - 1;
 
 void
 SetPwm(uint16_t value)
@@ -161,8 +176,8 @@ GetPwm()
 /** Calculate PWM value from linearly perceived brightness. Perception is approximately described as
  * `real_brightness ^ 0.33`, so just calculate `brightness ^ 3`.
  */
-uint8_t
-CalculatePwm(uint8_t brightness)
+uint16_t
+CalculatePwm(uint16_t brightness)
 {
     if (brightness == 0) {
         return 0;
@@ -178,20 +193,20 @@ CalculatePwm(uint8_t brightness)
 /** Approximate calculation of minimal value which will result in calculated PWM value 1 to
  * eliminate completely dark beginning.
  */
-constexpr uint8_t MIN_BRIGHTNESS =
+constexpr uint16_t MIN_BRIGHTNESS =
     (1 << (etl::bit_width(static_cast<uint32_t>(1) << (PWM_BITS * 2)) / 3)) - 1;
 
-uint8_t curBrightness = MIN_BRIGHTNESS;
+uint16_t curBrightness = MIN_BRIGHTNESS;
 // Limit indication in progress if not empty.
-Task indicateMaxTask;
+pulse::Task indicateMaxTask;
 
-TaskV
+pulse::TaskV
 IndicateMaxBrightness()
 {
     LedOff();
-    co_await Timer::Delay(etl::chrono::milliseconds(300));
+    co_await pulse::Timer::Delay(etl::chrono::milliseconds(300));
     LedOn();
-    co_await Timer::Delay(etl::chrono::milliseconds(300));
+    co_await pulse::Timer::Delay(etl::chrono::milliseconds(300));
     indicateMaxTask.ReleaseHandle();
 }
 
@@ -264,19 +279,19 @@ public:
     /** Get next click event. Value is number of clicked accumulated in given direction. Direction
      * represented by sign.
      */
-    Awaitable<int8_t>
+    pulse::Awaitable<int8_t>
     WaitClick()
     {
         co_return co_await clicks.Pop();
     }
 
 private:
-    TokenQueue<uint8_t> lineAEvent{5}, lineBEvents{5};
+    pulse::TokenQueue<uint8_t> lineAEvent{5}, lineBEvents{5};
     etl::optional<bool> lastDir;
     bool lastLine = false, halfClick = false;
-    InlineDiscardQueue<int8_t, true, 16> clicks;
+    pulse::InlineDiscardQueue<int8_t, true, 16> clicks;
 
-    TaskV
+    pulse::TaskV
     LineTask(bool isA);
 
     static bool
@@ -304,15 +319,15 @@ RotaryEncoder::OnLineInterrupt(bool isA)
 void
 RotaryEncoder::Initialize()
 {
-    Task::Spawn(LineTask(true)).Pin();
-    Task::Spawn(LineTask(false)).Pin();
+    pulse::Task::Spawn(LineTask(true), pulse::Task::HIGHEST_PRIORITY).Pin();
+    pulse::Task::Spawn(LineTask(false), pulse::Task::HIGHEST_PRIORITY).Pin();
 }
 
-TaskV
+pulse::TaskV
 RotaryEncoder::LineTask(bool isA)
 {
     constexpr auto JITTER_DELAY = etl::chrono::milliseconds(1);
-    Timer jitterTimer;
+    pulse::Timer jitterTimer;
 
     while (true) {
         co_await (isA ? lineAEvent : lineBEvents);
@@ -320,7 +335,7 @@ RotaryEncoder::LineTask(bool isA)
         bool pressed = false;
         while (true) {
             jitterTimer.ExpiresAfter(JITTER_DELAY);
-            size_t idx = co_await Task::WhenAny((isA ? lineAEvent : lineBEvents), jitterTimer);
+            size_t idx = co_await pulse::Task::WhenAny((isA ? lineAEvent : lineBEvents), jitterTimer);
             if (idx == 0) {
                 // Activated again, restart anti-jitter delay
                 continue;
@@ -378,7 +393,7 @@ RotaryEncoder::CommitClick(bool dir)
     }
 }
 
-TaskV
+pulse::TaskV
 RotaryEncoderTask()
 {
 
@@ -387,12 +402,12 @@ RotaryEncoderTask()
         if (indicateMaxTask) {
             continue;
         }
-        int16_t newBrightness = static_cast<int16_t>(curBrightness) + clicks;
+        int16_t newBrightness = static_cast<int16_t>(curBrightness) + (clicks << 4);
         if (newBrightness < MIN_BRIGHTNESS) {
             newBrightness = MIN_BRIGHTNESS;
         } else if (newBrightness > MAX_PWM) {
             newBrightness = MAX_PWM;
-            indicateMaxTask = Task::Spawn(IndicateMaxBrightness());
+            indicateMaxTask = pulse::Task::Spawn(IndicateMaxBrightness());
         }
         curBrightness = newBrightness;
         SetPwm(CalculatePwm(curBrightness));
@@ -421,7 +436,7 @@ HAL_GPIO_EXTI_Callback(uint16_t gpioPin)
 extern "C" [[noreturn]] int
 main()
 {
-    pulse_add_heap_region(heap, sizeof(heap));
+    pulse::AddHeapRegion(heap, sizeof(heap));
 
     HAL_Init();
     SystemClock_Config();
@@ -431,9 +446,9 @@ main()
     InitRotaryEncoder();
     rotEnc.Initialize();
 
-    Task::Spawn(RotaryEncoderTask()).Pin();
+    pulse::Task::Spawn(RotaryEncoderTask()).Pin();
 
-    Task::RunScheduler();
+    pulse::Task::RunScheduler();
 
     Panic("Scheduler exited");
 }
