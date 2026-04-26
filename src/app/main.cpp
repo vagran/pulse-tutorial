@@ -245,7 +245,7 @@ HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *hTim)
 {
     if (hTim->Instance == TIM2) {
         HAL_IncTick();
-        PulseTimerTick();
+        pulse::Timer::Tick();
     } else if (hTim->Instance == TIM3) {
         if (GetPwm() != 0 && !indicateMaxTask) {
             LedOn();
@@ -276,7 +276,7 @@ public:
     void
     OnLineInterrupt(bool isA);
 
-    /** Get next click event. Value is number of clicked accumulated in given direction. Direction
+    /** Get next click event. Value is number of clicks accumulated in given direction. Direction is
      * represented by sign.
      */
     pulse::Awaitable<int8_t>
@@ -328,14 +328,15 @@ RotaryEncoder::LineTask(bool isA)
 {
     constexpr auto JITTER_DELAY = etl::chrono::milliseconds(1);
     pulse::Timer jitterTimer;
+    pulse::TokenQueue<uint8_t> &lineEvents = isA ? lineAEvent : lineBEvents;
 
     while (true) {
-        co_await (isA ? lineAEvent : lineBEvents);
+        co_await lineEvents;
         // Suppress jitter - wait until active level is stable for a long period.
         bool pressed = false;
         while (true) {
             jitterTimer.ExpiresAfter(JITTER_DELAY);
-            size_t idx = co_await pulse::Task::WhenAny((isA ? lineAEvent : lineBEvents), jitterTimer);
+            size_t idx = co_await pulse::Task::WhenAny(lineEvents, jitterTimer);
             if (idx == 0) {
                 // Activated again, restart anti-jitter delay
                 continue;
@@ -361,19 +362,23 @@ RotaryEncoder::CommitEvent(bool triggerLineA, bool adjLineState)
 {
     bool dir = triggerLineA == adjLineState;
     if (!lastDir || *lastDir != dir) {
+        // First event or direction changed
         lastDir = dir;
         lastLine = triggerLineA;
         halfClick = true;
         return;
     }
     if (lastLine == triggerLineA) {
+        // Lines should alternate if consistent data
         return;
     }
     lastLine = triggerLineA;
     if (halfClick) {
+        // Second line trigger, full cycle detected
         CommitClick(dir);
         halfClick = false;
     } else {
+        // First line trigger, wait for the second one
         halfClick = true;
     }
 }
@@ -396,10 +401,10 @@ RotaryEncoder::CommitClick(bool dir)
 pulse::TaskV
 RotaryEncoderTask()
 {
-
     while (true) {
         int16_t clicks = co_await rotEnc.WaitClick();
         if (indicateMaxTask) {
+            // Limit indication is in progress
             continue;
         }
         int16_t newBrightness = static_cast<int16_t>(curBrightness) + (clicks << 4);
