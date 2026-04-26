@@ -18,21 +18,30 @@ When the brightness reaches its maximum level, the system will indicate this wit
 _This tutorial assumes a Linux host environment where applicable._
 
 
+### libc
+
+Pulse, ETL, and STM32Cube depend on `libc` for basic facilities such as standard headers (e.g.
+`stdint.h`). In embedded environments, `newlib` is the most commonly used `libc` implementation and
+is typically provided by the `arm-none-eabi-newlib` package.
+
+
 ### Compiler
 
 For GCC, you will typically need to install the `arm-none-eabi-gcc` package provided by your
 distribution.
 
 Clang, on the other hand, supports cross-compilation for a wide range of targets out of the box, so
-installing the `clang` package is sufficient for the compiler itself. However, Clang does not
-include a target sysroot, so you will still need to install one separately. This is usually located
-at `/usr/arm-none-eabi` and provided by packages such as `arm-none-eabi-binutils` and
-`arm-none-eabi-newlib`.
+installing the `clang` package is sufficient for the compiler itself.
 
 In addition, Clang relies on certain GCC runtime support files within the sysroot, so the
-`arm-none-eabi-gcc` package is still required. Since it typically depends on
-`arm-none-eabi-binutils` and `arm-none-eabi-newlib`, installing `arm-none-eabi-gcc` alongside
-`clang` is usually sufficient.
+`arm-none-eabi-gcc` package is still required. The example Clang toolchain file also uses the LLVM
+implementation of `binutils` and `lld` linker, so the `llvm` and `lld` packages must be installed as
+well.
+
+In practice, your setup will look something like this (adjust as needed for your distribution):
+```bash
+sudo pacman -Sy clang llvm lld arm-none-eabi-gcc arm-none-eabi-newlib
+```
 
 
 ## Project setup
