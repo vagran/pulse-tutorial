@@ -2,34 +2,45 @@
 
 This is tutorial for [Pulse framework](https://github.com/vagran/pulse).
 
-Let's create a simple project using Pulse framework. We will make a rotary encoder example with a
-STM32F103C8T6 MCU development board ("Blue pill"). It will decode encoder signals to direction and
-position change signals, and then applying them to control built-in LED brightness. It also will
-suppress input lines jittering in software. Despite this MCU has dedicated hardware for this kind of
-tasks, we will do it in software to demonstrate Pulse capabilities. When brightness reaches maximum,
-it should indicate it by short blink.
+Let's create a simple project using the Pulse framework. In this example, we will use an
+STM32F103C8T6 development board ("Blue Pill") to implement a rotary encoder interface.
+
+The application will decode the encoder signals into direction and position changes, and use them to
+control the brightness of the on-board LED. To improve signal quality, input jitter will be
+suppressed in software. Although this MCU provides dedicated hardware for handling rotary encoders,
+we will implement the logic in software to better demonstrate Pulse capabilities.
+
+When the brightness reaches its maximum level, the system will indicate this with a short blink.
 
 
 ## Environment
 
-_In this tutorial it is assumed that Linux host is used where it matters._
+_This tutorial assumes a Linux host environment where applicable._
 
 
 ### Compiler
 
-For GCC you typically need to install `arm-none-eabi-gcc` package on your distributive. Clang always
-support cross-compilation for all its variety of targets, so just `clang` package is needed if using
-Clang. However, it lacks of target sysroot, so it still needs target sysroot which is typically
-located in `/usr/arm-none-eabi` and provided by packages like `arm-none-eabi-binutils` and
-`arm-none-eabi-newlib`. It also needs some GCC runtime support files in sysroot so
-`arm-none-eabi-gcc` package still need to be installed.
+For GCC, you will typically need to install the `arm-none-eabi-gcc` package provided by your
+distribution.
+
+Clang, on the other hand, supports cross-compilation for a wide range of targets out of the box, so
+installing the `clang` package is sufficient for the compiler itself. However, Clang does not
+include a target sysroot, so you will still need to install one separately. This is usually located
+at `/usr/arm-none-eabi` and provided by packages such as `arm-none-eabi-binutils` and
+`arm-none-eabi-newlib`.
+
+In addition, Clang relies on certain GCC runtime support files within the sysroot, so the
+`arm-none-eabi-gcc` package is still required. Since it typically depends on
+`arm-none-eabi-binutils` and `arm-none-eabi-newlib`, installing `arm-none-eabi-gcc` alongside
+`clang` is usually sufficient.
 
 
 ## Project setup
 
+
 ### Project layout
 
-We will use the following project directories layout:
+We will use the following project directory layout:
 ```
 +- src
 |  +- app
@@ -39,99 +50,123 @@ We will use the following project directories layout:
    +- etl
    +- pulse
 ```
-[`src/app`](./src/app) will contain all source code for the tutorial application.
-[`modules`](./modules) used for Git submodules with dependencies.
+The [`src/app`](./src/app) directory will contain all source code for the tutorial application.
+
+The [`modules`](./modules) directory is used for Git submodules that provide external dependencies.
 
 
 #### STM32Cube
 
-We will use STM32Cube SDK provided by the vendor. The base package and patch can be downloaded
-[here](https://www.st.com/en/embedded-software/stm32cubef1.html). They should be extracted, patch
-should override base package. I prefer manually select necessary files from SDK (other option is
-installing STM32CubeMX software and generating code from there). We will need assembly entry point
-for our MCU in `Core/Startup`, CMSIS drivers in `Drivers/CMSIS/Device/STM32F1xx` and HAL drivers in
-`Drivers/STM32F1xx_HAL_Driver`. See full layout in the [repository](./src/STM32CubeF1).
+We will use the STM32Cube SDK provided by the vendor. The base package and its patch can be
+downloaded [here](https://www.st.com/en/embedded-software/stm32cubef1.html). After downloading,
+extract both archives and apply the patch over the base package.
+
+In this tutorial, we will manually select only the required files from the SDK. An alternative
+approach is to use STM32CubeMX to generate the project automatically.
+
+Specifically, we will use:
+- the assembly startup files for our MCU from `Core/Startup`,
+- CMSIS device headers from `Drivers/CMSIS/Device/STM32F1xx`,
+- HAL drivers from `Drivers/STM32F1xx_HAL_Driver`.
+
+You can refer to the complete layout in the [repository](./src/STM32CubeF1).
 
 
 ### Toolchain
 
-In this tutorial we can use either Clang or GCC cross-compiler. We will use CMake toolchain files
-functionality to define the toolchain. See toolchain files for [Clang](./arm-clang-toolchain.cmake)
-and [GCC](./arm-gcc-toolchain.cmake) in the repository.
+In this tutorial, you can use either the Clang or GCC cross-compiler. The toolchain will be
+configured using CMake toolchain files.
+
+Refer to the provided toolchain files for [Clang](./arm-clang-toolchain.cmake) and
+[GCC](./arm-gcc-toolchain.cmake) in the repository.
 
 
 ### Dependency modules
 
-The dependencies should be added as git submodules in `modules` directory. We need
-[ETL](https://github.com/ETLCPP/etl) as C++ standard templates library:
+Add external dependencies as Git submodules in the `modules` directory.
 
+We will use [ETL](https://github.com/ETLCPP/etl) as a lightweight C++ template library:
 ```bash
 git submodule add --depth 1 https://github.com/ETLCPP/etl modules/etl
 ```
-
-You also might want to checkout specific release tag:
+Optionally, you can check out a specific release tag:
 ```bash
 cd modules/etl
 git fetch --depth 1 --tags origin 20.45.0
 git checkout 20.45.0
 ```
-_Currently 20.46 and 20.47 releases seems to be [broken](https://github.com/ETLCPP/etl/issues/1404)._
+_Currently, versions 20.46 and 20.47 appear to be broken (see [issue
+#1404](https://github.com/ETLCPP/etl/issues/1404))._
+Pulse uses ETL extensively in both its implementation and public API, so it is strongly recommended
+to use ETL in your application as well.
 
-The same for [Pulse](https://github.com/vagran/pulse) framework:
+Add the [Pulse](https://github.com/vagran/pulse) framework in the same way:
 ```bash
 git submodule add --depth 1 https://github.com/vagran/pulse modules/pulse
 ```
 
-
 ### Makefile
 
-We will use CMake for building.
+We will use CMake as the build system.
 
 ```cmake
 set(CMAKE_CXX_STANDARD 20)
 ```
-Pulse requires at least C++20 for coroutines support.
+Pulse requires at least C++20 due to its use of coroutines.
 
 ```cmake
 add_compile_options(-mcpu=cortex-m3 -mthumb)
 add_link_options(-mcpu=cortex-m3 -mthumb)
 ```
-Set Cortex-M3 target with Thumb support.
+These options configure the build for the Cortex-M3 target with Thumb instruction set support.
 
 ```
 add_compile_definitions(STM32F103xB)
 ```
-This preprocessor symbol tells the STM32Cube SDK proper MCU model.
+This preprocessor definition selects the correct MCU model within the STM32Cube SDK.
 
 ```cmake
 add_link_options(-Wl,-gc-sections,--print-memory-usage,-Map=${PROJECT_BINARY_DIR}/${PROJECT_NAME}.map)
 ```
-Some useful linker options. `-ffunction-sections` compile option specified before that, causes
-compiler to place each function in its own separated section, while `-gc-sections` linker option
-instructs linker to discard all unused section. This results that all unused functions are discarded
-from the resulted binary. Other options allow printing memory usage by segments and dump full memory
-map which may be useful for debugging.
+These are useful linker options for embedded builds.
+
+When combined with the `-ffunction-sections` compile option, the compiler places each function into
+its own separate section. The `-gc-sections` linker flag then enables garbage collection of unused
+sections, allowing the linker to strip out any functions that are not referenced in the final
+binary. This typically results in a significantly smaller firmware image by removing unused code
+automatically.
+
+The remaining options provide build diagnostics:
+
+ - --print-memory-usage prints a summary of memory consumption by section.
+ - -Map=... generates a full linker map file, which is useful for debugging memory layout and symbol placement.
 
 ```cmake
 set(LINKER_SCRIPT ${CMAKE_SOURCE_DIR}/src/STM32F103CBTX_FLASH.ld)
 add_link_options(-T ${LINKER_SCRIPT})
 ```
-Use custom linker script.
+This configuration sets a custom linker script and instructs the linker to use it during the build
+process.
+
+The linker script defines the memory layout of the firmware (Flash, RAM, and section placement),
+which is essential for bare-metal embedded targets.
 
 ```cmake
 target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 ```
-C++ exceptions and RTTI are not used in Pulse, and in general rarely used in embedded applications.
+C++ exceptions and RTTI are not used in Pulse, and are generally avoided in embedded systems due to
+their runtime overhead and binary size impact.
 
 ```cmake
 set(PULSE_PORT ARM_CM3)
 add_subdirectory("${CMAKE_SOURCE_DIR}/modules/pulse/src" "${CMAKE_BINARY_DIR}/pulse")
 target_link_libraries(${PROJECT_NAME} PRIVATE pulse::pulse)
 ```
-This is how link Pulse submodule to your project. Built-in port `ARM_CM3` is specified.
+This is how the Pulse submodule is integrated into the project. The built-in `ARM_CM3` port is
+selected to match the Cortex-M3 target used by the STM32F103.
 
-Let's also handle debug build by disabling optimizations for easier debugging and defining `DEBUG`
-preprocessor symbol to detect debug build in code and, e.g. enable assertions:
+We will also handle debug builds by disabling optimizations to make debugging easier, and by
+defining a `DEBUG` preprocessor symbol that can be used in code (for example, to enable assertions).
 ```cmake
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fno-omit-frame-pointer")
@@ -139,7 +174,7 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 ```
 
-Now you can build the project by these commands:
+You can now build the project using the following commands:
 ```bash
 cmake -DCMAKE_TOOLCHAIN_FILE=arm-clang-toolchain.cmake -B build -G "Unix Makefiles"
 cmake --build build
@@ -147,79 +182,105 @@ cmake --build build
 
 ## Source code
 
-Here is what we have in [`src/app`](src/app).
+The source code is located in [`src/app`](src/app).
+
 
 ### Linker script
 
-See [linker script file](src/STM32F103CBTX_FLASH.ld). This is mostly generated by STM32CubeIDE. Pay
-attention to this line:
+See the [linker script file](src/STM32F103CBTX_FLASH.ld). It is mostly generated by STM32CubeIDE.
+
+Pay attention to the following line:
 ```
 _Min_Heap_Size = 0;
 ```
-It does not reserve space for heap in way used by typical libc implementation. Instead we will
-define our heap in code and register it in Pulse memory allocator.
+This does not reserve heap space in the way typical libc implementations do. Instead, we will define
+the heap in code and register it with Pulse’s memory allocator.
 
 ```
 _Min_Stack_Size = 0x400; /* required amount of stack */
 ```
-This line defines how much stack space is reserved for the application.
+This line specifies the amount of stack memory reserved for the application.
 
 
 ### Configuration files
 
-Some components are configured by providing header files with necessary preprocessor definitions.
+Some components are configured through header files that define the required preprocessor symbols.
 
 
 #### STM32Cube HAL configuration
 
-[`stm32f1xx_hal_conf.h`](src/app/stm32f1xx_hal_conf.h) files defines which HAL drivers are enabled
-and their parameters. You should review and edit list of enabled modules, you typically need some
-essentials like clock control, GPIO, external interrupts, timers which are enabled by
-`HAL_RCC_MODULE_ENABLED`, `HAL_GPIO_MODULE_ENABLED`, `HAL_EXTI_MODULE_ENABLED` and
-`HAL_TIM_MODULE_ENABLED`.
+The [`stm32f1xx_hal_conf.h`](src/app/stm32f1xx_hal_conf.h) file controls which HAL drivers are
+enabled, along with their configuration parameters.
 
-Also proper clock sources should be defined here. "Blue pill" has 8MHz oscillator so `HSE_VALUE`
-should be set to `8000000`.
+You should review and adjust the list of enabled modules as needed. In most cases, you will want at
+least the essential peripherals such as clock control, GPIO, external interrupts, and timers. These
+are enabled via definitions like:
+- `HAL_RCC_MODULE_ENABLED`
+- `HAL_GPIO_MODULE_ENABLED`
+- `HAL_EXTI_MODULE_ENABLED`
+- `HAL_TIM_MODULE_ENABLED`
+
+Clock configuration is also defined in this file. The "Blue Pill" board uses an 8 MHz external
+oscillator, so `HSE_VALUE` should be set to `8000000`.
 
 
 ### ETL configuration
 
-ETL searches for [`etl_profile.h`](src/app/etl_profile.h) file to get its configuration. The only
-required value there is `ETL_NO_STL` which tells that it is completely standalone STL replacement.
+ETL looks for an [`etl_profile.h`](src/app/etl_profile.h) file to obtain its configuration. The only
+required setting in this file is `ETL_NO_STL`, which indicates that ETL is used as a completely
+standalone STL replacement.
 
 
 ### Pulse configuration
 
-Pulse searches for [`pulse_config.h](src/app/pulse_config.h) file for its configuration.
+Pulse searches for a [`pulse_config.h`](src/app/pulse_config.h) file to obtain its configuration.
 
-First thing you should deal with is memory allocation configuration. C++ coroutines require
-dynamic allocation for coroutine frame so this is essential. Fortunately, Pulse includes highly
-optimized memory allocator suitable for any embedded target. It can be configured for particular
-memory constraints by adjusting these core parameters: `pulseConfig_MALLOC_GRANULARITY` and
-`pulseConfig_MALLOC_BLOCK_SIZE_WORD_SIZE`. Granularity defines smallest memory allocation units and
-simultaneously its alignment. Value `8` works best for most cases however you might want to adjust
-it if having too small or too big RAM. `pulseConfig_MALLOC_BLOCK_SIZE_WORD_SIZE` is a bit tricky, it
-defines size in bytes of memory block size word. For example, value `2` means block size should be
-represented by 16-bits unsigned integer which reflects number of allocation units. Having
-granularity of 8 bytes and word size 2 means the maximal size of allocated block would be
-`8 * 65536 = 524288`. Actually it's a bit less due to block overhead, but close to that. Actual
-value can be obtained by `get_malloc_max_size()` function in run time if needed. Each allocated
-block has two size fields, so in this example, it will have `2 * 2 = 4` bytes overhead. So balancing
-these two values you can define most optimal memory allocator configuration in terms of allocation
-overhead and maximal block size for you exact RAM constraints. Having
-`pulseConfig_MALLOC_BLOCK_SIZE_WORD_SIZE = 1` will get you just 2 bytes overhead per block which may
-be useful if having, e.g. 512 bytes of RAM. Correctness of the parameters combinations is validated
-by Pulse in compile time.
+The first aspect to address is memory allocation. C++ coroutines require dynamic allocation for
+their coroutine frames, so this configuration is essential.
 
-Defining `#define pulseConfig_MALLOC_FAILED_PANIC 1` allows failing fast on memory allocation
-failure instead of just returning null pointer.
+Fortunately, Pulse provides a highly optimized allocator designed for embedded systems. It can be
+tuned to specific memory constraints using the following core parameters:
+- `pulseConfig_MALLOC_GRANULARITY`
+- `pulseConfig_MALLOC_BLOCK_SIZE_WORD_SIZE`
 
-`#define pulseConfig_MALLOC_STATS 1` enables memory allocation statistics gathering and obtaining it
-by `pulse::GetMallocStats()` function.
+`pulseConfig_MALLOC_GRANULARITY` defines the smallest allocation unit and also determines alignment.
+A value of `8` is generally a good default, but you may want to adjust it depending on whether RAM
+is very limited or relatively abundant.
 
-If you want to have dynamic memory allocation in ISR context (which sometimes might be needed if
-using in ISR Pulse functions which are marked is ISR-safe), you need to provide
-`pulseConfig_MALLOC_LOCK` and `pulseConfig_MALLOC_UNLOCK` macros. For example:
+`pulseConfig_MALLOC_BLOCK_SIZE_WORD_SIZE` defines the size (in bytes) of the integer type used to
+store block sizes. For example, a value of `2` means a 16-bit unsigned integer is used to represent
+the number of allocation units.
+
+With a granularity of 8 bytes and a 2-byte block size field, the maximum representable allocation
+size is:
+```
+8 × 65536 = 524288 bytes
+```
+
+The actual maximum is slightly lower due to allocator overhead, but it is in that range. If needed,
+the exact value can be queried at runtime using `pulse::GetMallocMaxSize()`.
+
+Each allocated block also carries size metadata. In this configuration, the overhead is `2 × 2 = 4`
+bytes per block.
+
+By balancing these two parameters, you can tune the allocator for your specific constraints, trading
+off between overhead and maximum allocatable block size.
+
+Using `pulseConfig_MALLOC_BLOCK_SIZE_WORD_SIZE = 1` reduces overhead to just 2 bytes per block,
+which can be useful in extremely constrained environments (for example, systems with only a few
+hundred bytes of RAM). The validity of parameter combinations is checked at compile time by Pulse.
+
+Enabling:
+```c
+#define pulseConfig_MALLOC_FAILED_PANIC 1
+```
+turns on allocation statistics tracking, which can be accessed via `pulse::GetMallocStats()`.
+
+If you need dynamic memory allocation in ISR context (for example, when using Pulse APIs that are
+ISR-safe — although dynamic allocation in ISR context are generally avoided but may be required in
+some cases), you must provide the `pulseConfig_MALLOC_LOCK` and `pulseConfig_MALLOC_UNLOCK` macros.
+
+For example:
 ```cpp
 #ifdef __cplusplus
 extern "C" {
@@ -238,22 +299,25 @@ MallocUnlock();
 #define pulseConfig_MALLOC_LOCK()                   MallocLock()
 #define pulseConfig_MALLOC_UNLOCK()                 MallocUnlock()
 ```
-`MallocLock()` and `MallocUnlock()` functions should ensure no interrupt can occur between these
-calls. They can use Pulse critical section API, for example.
+`MallocLock()` and `MallocUnlock()` must ensure that no interrupt can occur between the lock and
+unlock operations. This can be implemented using Pulse’s critical section primitives, for example.
 
-To use timers you should define tick frequency by
+To use timers, you need to define the system tick frequency:
 ```cpp
 #define pulseConfig_TICK_FREQ                       1000
 ```
-`pulse::Timer::Tick()` function (or C version `PulseTimerTick()`) should be called with this
-frequency.
+The `pulse::Timer::Tick()` function (or its C equivalent `PulseTimerTick()`) must then be called at
+this frequency.
 
-`pulseConfig_MAX_SYSCALL_INTERRUPT_PRIORITY` defines highest interrupt priority under which ISR-safe
-Pulse functions can be called. You should never call any Pulse function in higher priority ISR code.
+`pulseConfig_MAX_SYSCALL_INTERRUPT_PRIORITY` defines the highest interrupt priority from which
+ISR-safe Pulse functions may be called. Pulse functions must never be called from interrupts with a
+higher priority than this level. The only exception is `pulse::Timer::Tick()`, which can be called
+from interrupts of any priority. This is typically necessary because system tick interrupts are
+often configured with a relatively high priority.
 
-Pulse config code has internal validation by using asserts in critical places. You can enable them
-by defining `pulseConfig_ASSERT` macro. Typically you want to do this only in debug build to
-eliminate performance and code size impact in release build:
+Pulse configuration includes internal validation through assertions in most critical checkpoints.
+You can enable these checks by defining the `pulseConfig_ASSERT` macro. Typically, this is enabled
+only in debug builds to avoid performance overhead and code size increase in release builds:
 ```cpp
 #ifdef DEBUG
 #   define pulseConfig_ASSERT(x) do { \
@@ -265,22 +329,24 @@ eliminate performance and code size impact in release build:
 #   define pulseConfig_ASSERT(x)
 #endif
 ```
-The macro takes checked condition argument.
+The macro takes a condition as its argument and triggers a panic if the condition evaluates to
+false.
 
 
 ### System calls stubs
 
-libc implementation like `newlib` requires some basic system calls to be available. If your project
-does not rely on libc provided features, most of them can be just empty stubs. They are defined in
-[`syscals.c`](src/app/syscalls.c) file.
+Libc implementations such as `newlib` require a set of basic system calls to be provided by the
+application. If your project does not use libc-provided functionality, most of these system calls
+can be implemented as empty stubs. They are defined in [`syscalls.c`](src/app/syscalls.c).
 
 
 ### MCU support package
 
-The approach enforced by STM32Cube requires you to define hardware configuration by adjusting set of
-functions called "MCU support package" (MSP). This code is located in [`src/app/msp`](src/app/msp).
-This is mostly generated by STM32Cube. The only adjustment needed there is calling
-`PulseTimerTick()` for each system tick:
+The STM32Cube approach requires hardware configuration to be defined through a set of functions
+known as the MCU Support Package (MSP). This code is located in [`src/app/msp`](src/app/msp) and is
+typically generated by STM32Cube.
+
+The only required modification in this tutorial is to call `PulseTimerTick()` on each system tick:
 ```cpp
 void
 HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
@@ -293,30 +359,35 @@ HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 ### Application
 
-Finally we can have hands on our application code.
+Finally, we can move on to the application code itself.
 
-First thing to do when Pulse application starts, is providing heap space to allow dynamic memory
-allocations. We define our heap space as follows:
+The first step in a Pulse-based application is to provide a heap region for dynamic memory
+allocation. We define the heap as follows:
 ```cpp
 pulse::MallocUnit heap[PULSE_HEAP_UNITS_SIZE_KB(16)];
 ```
-`pulse::MallocUnit` is a helper type which size and alignment corresponds to current memory
-allocator configuration so it is the easiest way to define heap space. `PULSE_HEAP_UNITS_SIZE*`
-macros are complementary helpers for defining resulting heap size. Here we define 16KB, however this
-particular application requires just hundreds of bytes for coroutines frames - equivalent to what
-would be otherwise allocated on stack in a traditional application.
 
-Note that memory allocator has also C API which can be used from C files or as standalone embedded
-memory allocator library.
+`pulse::MallocUnit` is a helper type whose size and alignment match the current memory allocator
+configuration. This makes it the simplest and safest way to define heap storage.
 
-Then the allocated space is fed to the Pulse memory manager:
+The `PULSE_HEAP_UNITS_SIZE_*` macros are complementary helpers used to express heap size in
+convenient units. In this case, we allocate 16 KB of heap. However, this particular application only
+requires a few hundred bytes for coroutine frames—memory that would otherwise typically be allocated
+on the stack in a traditional implementation.
+
+The allocator also provides a C API, which can be used from plain C code or as a standalone embedded
+memory allocator.
+
+After defining the heap buffer, it must be registered with the Pulse memory manager:
 ```cpp
 pulse::AddHeapRegion(heap, sizeof(heap));
 ```
-You can add multiple regions if you want. This also can be done at any time after application
-started. This may be handy if your MCU has several RAM banks (like TCM RAM regions on STM32 MCUs).
+You can register multiple memory regions if needed, and this can be done at any point after the
+application has started. This is useful on MCUs with multiple RAM banks, such as TCM RAM regions
+found on some STM32 devices.
 
-Here we define synchronization function for memory manager, specified earlier in `pulse_config.h`:
+Here we define the synchronization functions for the memory manager, as specified earlier in
+`pulse_config.h`:
 ```cpp
 void
 MallocLock()
@@ -331,7 +402,7 @@ MallocUnlock()
 }
 ```
 
-Let's also provide `Panic()` function to allow catching unexpected error conditions:
+We will also provide a `Panic()` function to handle unexpected error conditions:
 ```cpp
 [[noreturn]] void
 Panic(const char *msg)
@@ -358,11 +429,14 @@ Panic(const char *msg)
 #endif
 }
 ```
-It will stop anything in endless loop, waiting for debugger be attached in debug build. In release
-it will reset the MCU with some delay. You may want also to turn on some fault LED and flush debug
-console UART in your application.
+In debug builds, the system halts in an infinite loop, allowing a debugger to attach and inspect the
+state.
 
-Next, define out I/O:
+In release builds, the MCU performs a short delay and then resets. In a real application, you may
+also want to signal the fault using an LED indicator or flush any pending debug output (for example
+via UART) before triggering the reset.
+
+Next, we define the I/O configuration:
 ```cpp
 struct GpioLine {
     uintptr_t port;
@@ -382,10 +456,10 @@ constexpr GpioLine
     ioRotEncA   DEF_IO(A, 10),
     ioRotEncB   DEF_IO(A, 11);
 ```
-Builtin LED is connected to `PC13`. Rotary encoder line `A` should be connected to `PC10`, line `B`
-to `PC11`, ground pin to ground.
+The built-in LED is connected to `PC13`. The rotary encoder signals should be connected as follows:
+channel `A` to `PC10`, channel `B` to `PC11`, and the ground pin to `GND`.
 
-Initialize HAL and clock by calling STM32Cube functions:
+Initialize the HAL and system clock by calling the STM32Cube functions:
 ```cpp
 HAL_Init();
 SystemClock_Config();
@@ -411,8 +485,9 @@ InitLed(void)
 }
 ```
 
-LED anode is connected to `VCC`, cathode to `PC13` pin via a resistor, so we configure the pin as
-`open drain` type and it will have active level low, which is reflected in the following functions:
+The LED anode is connected to `VCC`, and the cathode is connected to `PC13` through a resistor.
+Because of this wiring, the pin is configured as `open-drain` and operates with an active-low logic
+level. This is reflected in the control functions:
 ```cpp
 void
 LedOn()
@@ -427,12 +502,13 @@ LedOff()
 }
 ```
 
-PWM is configured using `TIM3`. The LED pin `PC13` cannot be used as PWM output, so we will
-implement software PWM - LED pins will be toggled in timer ISR. It is configured at 1kHz frequency
-and 10 bits resolution.
+PWM is implemented using `TIM3`. Since `PC13` cannot be used as a hardware PWM output, we will
+instead implement software PWM by toggling the LED pin inside the timer interrupt service routine.
 
-Let's examine rotary encoder implementation code. Start from getting input from encoder lines in
-ISR:
+The timer is configured to run at 1 kHz with 10-bit resolution.
+
+Let’s examine the rotary encoder implementation, starting with how input events are captured in the
+interrupt service routine:
 ```cpp
 extern "C" void
 EXTI15_10_IRQHandler()
@@ -460,16 +536,22 @@ RotaryEncoder::OnLineInterrupt(bool isA)
     (isA ? lineAEvent : lineBEvents).Push();
 }
 ```
-Here it uses `TokenQueue` class to publish line falling edge events. Each token is numeric event ID,
-which is incremented with each event. Constructor argument is limit for tokens which can be queued
-by `Push()` method for retrieving later by `Take()` of `Peek()` methods. Excessive tokens are
-discarded. `Push()` method can be called from ISR and is synchronous, while `Take()` is asynchronous
-- it can be awaited in coroutine. This class is a light-weight way for propagating parameter-less
-events from ISRs or any other context to coroutines. For events with parameters or any other objects
-to queue, `DiscardQueue` can be used. For communication between coroutines - `BlockingQueue`.
 
+Here we use the `TokenQueue` class to publish falling-edge events from the encoder lines. Each token
+is a numeric event ID that is incremented with every event.
 
-Encoder initialization method spawns two tasks, one for processing events from each encoder line:
+The constructor argument defines the maximum number of tokens that can be queued via `Push()` before
+being consumed through `Take()` or `Peek()`. If the queue is full, additional tokens are discarded.
+
+`Push()` is ISR-safe and executes synchronously, while `Take()` is asynchronous and can be awaited
+inside a coroutine.
+
+This makes `TokenQueue` a lightweight mechanism for forwarding parameter-less events from ISRs (or
+other contexts) into coroutine logic. For events that need to carry parameters or more complex data,
+`DiscardQueue` can be used instead. For coroutine-to-coroutine communication, `BlockingQueue` is the
+appropriate choice.
+
+The encoder initialization method creates two tasks, one for handling events from each encoder line:
 ```cpp
 void
 RotaryEncoder::Initialize()
@@ -478,21 +560,30 @@ RotaryEncoder::Initialize()
     pulse::Task::Spawn(LineTask(false), pulse::Task::HIGHEST_PRIORITY).Pin();
 }
 ```
-You should use `pulse::Task::Spawn()` method to spawn new coroutine (task). The method registers the
-task in Pulse scheduler and it will be invoked once the scheduler will switch to next ready task.
-Tasks scheduled according to priority.
+You should use `pulse::Task::Spawn()` to create a new coroutine (task). This method registers the
+task with the Pulse scheduler, and the task will be executed when the scheduler switches to the next
+ready task. Tasks are scheduled according to their priority.
 
-Task handle returned by `Spawn()` method is basically a shared pointer to coroutine frame. The
-coroutine is destroyed when last reference is released. The scheduler holds reference only to
-scheduled or active tasks. Once a task reaches suspension point, schedular do not have the reference
-to it. Awaiter usually also does not hold reference (it uses weak pointer) in order to prevent
-reference loop. So to prevent task from destruction on first suspension point, either store the task
-handle for its lifetime, or alternative use `Pin()` method to pin the task, i.e. prevent it from
-destruction even after last reference is released. Awaiting task result also holds reference. Be
-careful with pinning short repetitive tasks, they either should be unpinned by `Unpin()` method or
-preferably store the handle. Use `Pin()` method for tasks which are created once and for the application
-lifetime, when their handle is not needed, like in this example - encoder lines handling tasks will
-run forever, handling line events:
+The handle returned by `Spawn()` is essentially a shared pointer to the coroutine frame. The
+coroutine is destroyed when the last reference to it is released. The scheduler itself only keeps
+references to tasks that are currently scheduled or active. Once a task reaches a suspension point,
+the scheduler typically no longer holds a direct reference to it.
+
+Awaiters also generally do not keep strong references (they use weak references internally) to avoid
+reference cycles. As a result, if nothing holds the task handle, the coroutine may be destroyed
+after its first suspension point.
+
+To prevent this, you can either:
+- store the task handle for the lifetime of the task, or
+- use the `Pin()` method to pin the task, preventing destruction even when the last external
+  reference is released.
+
+Awaiting a task result also keeps it alive by holding a reference.
+
+Be careful with pinning short-lived or repetitive tasks: they should either be explicitly unpinned
+using `Unpin()`, or preferably managed via stored handles. `Pin()` is intended for long-lived tasks
+that run for the entire application lifetime and do not need external ownership, such as in this
+example where encoder line handlers run indefinitely:
 ```cpp
 pulse::TaskV
 RotaryEncoder::LineTask(bool isA)
@@ -527,19 +618,27 @@ RotaryEncoder::LineTask(bool isA)
     }
 }
 ```
-This is task function, which is defined by its return type. `TaskV` is used for tasks with void
-result, `TTask<TRet>` used when some result is returned. Both derived from `Task` base class which
-is result-independent coroutine handle. Here it first awaits for next event from corresponding line
-token queue. Once falling edge is detected it starts anti-jitter delay timer. We need to ensure
-signal is stable during the delay duration. Timer object can be awaited for implementing a delay in
-coroutine. Simple delays also can be performed by `Timer::Delay()` static method. Here by
-`Task::WhenAny()` method we can aggregate awaiting on multiple awaiters. It returns index of the
-first ready awaiter. If you need to wait for all awaiters to be ready, use `Task::WhenAll()` method.
-Both can accept tasks, awaiters or awaitable objects (ones having operator `co_await` defined for
-them). In this code, if first awaiter becomes ready (which is line event), it means line has changed
-state before anti-jitter delay expired, so the delay restarts. If delay expires first, then there
-was not falling edge detected, however rising edges are not detected, so it is checked if line is
-still in active state (low). If it is, filtered line event is committed.
+This is a task function, identified by its return type. `TaskV` is used for tasks that return no
+result, while `TTask<TRet>` is used when a result value is produced. Both derive from the `Task`
+base class, which represents a result-independent coroutine handle.
+
+In this example, the task first waits for an event from the corresponding line’s token queue. Once a
+falling edge is detected, it starts an anti-jitter (debounce) delay using a timer. The goal is to
+ensure that the signal remains stable for the entire delay duration.
+
+A `Timer` object can itself be awaited to implement delays directly within a coroutine. Simple
+delays can also be performed using the static `Timer::Delay()` method.
+
+The `Task::WhenAny()` method allows waiting on multiple awaitables simultaneously. It returns the
+index of the first awaiter that becomes ready. If you need to wait for all awaiters to complete, use
+`Task::WhenAll()` instead. Both functions accept tasks, awaiters, or any awaitable object (i.e.
+types implementing `operator co_await`).
+
+In this code, if the line event becomes ready first, it means the signal changed again before the
+debounce interval expired, so the delay is restarted. If the timer expires first, no new transitions
+occurred during the delay window. Since rising edges are not explicitly handled here, the code then
+checks whether the line is still in the active (low) state. If it is, the filtered event is
+committed.
 
 ```cpp
 void
@@ -564,9 +663,12 @@ RotaryEncoder::CommitEvent(bool triggerLineA, bool adjLineState)
     }
 }
 ```
-Here rotation direction is determined by checking other line state during detected falling edge.
-Typical encoder click corresponds to full cycle - i.e. both lines transitioned to active state with
-the same detected direction.
+The rotation direction is determined by sampling the state of the opposite encoder line at the
+moment a falling edge is detected.
+
+A full encoder detent ("click") corresponds to one complete cycle, where both lines transition
+through their active states in a consistent direction. This function tracks that sequence and only
+emits a `CommitClick()` when a full, valid cycle has been detected.
 
 ```cpp
 // Defined in RotaryEncoder class
@@ -587,12 +689,15 @@ RotaryEncoder::CommitClick(bool dir)
     }
 }
 ```
-Here we use discard queue to further propagate detected clicks. The queue stores accumulated number
-of clicks in one direction, direction is indicated by sign. Base `DiscardQueue` class accepts
-external storage for queue content which might be dynamically or statically allocated.
-`InlineDiscardQueue` (and other classes with `Inline` prefix in name) embeds the storage of fixed
-size (specified in template parameter). The resulting stream of detected clicks is exposed in the
-class interface like this:
+Here we use a discard queue to propagate detected click events. The queue stores the accumulated
+number of clicks in a given direction, with the sign indicating direction.
+
+The base `DiscardQueue` class uses externally provided storage, which can be either dynamically or
+statically allocated. The `InlineDiscardQueue` (and other types prefixed with `Inline`) embeds
+fixed-size internal storage defined by a template parameter.
+
+The resulting click stream is exposed through the class interface as follows:
+
 ```cpp
 /** Get next click event. Value is number of clicked accumulated in given direction. Direction
  * represented by sign.
@@ -603,14 +708,17 @@ WaitClick()
     co_return co_await clicks.Pop();
 }
 ```
-You can define any coroutine by specifying return type `pulse::Awaitable`. It is very similar to
-`Task` but differs by initial suspension mode - `Task` body code starts execution only when task
-starts by the scheduler, in contrast `Awaitable` is started synchronously until first suspension
-point is reached and suspended (if corresponding awaiter is not instantly ready). `Task::Spawn()`
-method can accept only `Task` (and its derived `TaskV` and `TTask`), `Awaitable` should be used for
-directly invoked functions.
+You can define a coroutine by using the `pulse::Awaitable` return type. It is similar to `Task`, but
+differs in its initial execution behavior.
 
-Here is tasks which processes encoder clicks:
+A `Task` begins execution only when it is scheduled by the Pulse scheduler. In contrast, an
+`Awaitable` starts executing immediately in a synchronous context until it reaches its first
+suspension point, at which point it suspends (unless the corresponding awaiter is already ready).
+
+The `Task::Spawn()` method accepts only `Task` types (including `TaskV` and `TTask`). In contrast,
+`Awaitable` is intended for functions that are invoked directly and may later be awaited.
+
+Here is the task that processes encoder click events:
 ```cpp
 uint16_t curBrightness = MIN_BRIGHTNESS;
 // Limit indication in progress if not empty.
@@ -637,11 +745,14 @@ RotaryEncoderTask()
     }
 }
 ```
-It adjusts current brightness value correspondingly. Resulting PWM is calculated by `CalculatePwm()`
-which introduces non-linearity to better match non-linear brightness perception by human eye. We
-also spawn additional task to indicate maximal limit reaching. While it is active, brightness
-adjustment is blocked.
+It adjusts the current brightness value accordingly. The resulting PWM duty cycle is computed using
+`CalculatePwm()`, which applies a non-linear mapping to better match the human eye’s perception of
+brightness.
 
+An additional task is spawned to indicate when the maximum brightness limit is reached. While this
+indication task is active, further brightness adjustments are temporarily blocked.
+
+The indication itself is implemented as a short LED blink:
 ```cpp
 pulse::TaskV
 IndicateMaxBrightness()
@@ -653,11 +764,13 @@ IndicateMaxBrightness()
     indicateMaxTask.ReleaseHandle();
 }
 ```
-`Timer::Delay()` is used for simple delays. `Task::ReleaseHandle()` makes task handle empty also
-releasing reference it holds to the task - in such way it unblocks further brightness adjustments by
-encoder clicks.
+`Timer::Delay()` is used here to implement simple timed delays within a coroutine.
+`Task::ReleaseHandle()` clears the task handle and releases its reference to the coroutine, allowing
+the system to consider the indication task finished. This, in turn, unblocks further brightness
+adjustments from encoder input.
 
-Final piece is spawning top-level application tasks and starting scheduler in `main()` function:
+The final step is to spawn the top-level application tasks and start the Pulse scheduler from
+`main()`:
 ```cpp
 rotEnc.Initialize();
 
@@ -667,6 +780,8 @@ pulse::Task::RunScheduler();
 
 Panic("Scheduler exited");
 ```
-This is should be your typical `main()` pattern. `Task::RunScheduler()` should never exit, it runs
-all scheduled tasks according to their priorities. If there are no more tasks in ready state, it puts
-MCU into low-power sleep mode.
+This is the typical `main()` pattern for a Pulse-based application. `Task::RunScheduler()` is
+expected never to return: it drives execution of all scheduled tasks according to their priorities.
+
+If no tasks are ready to run, the scheduler places the MCU into a low-power sleep state and resumes
+execution when an interrupt schedules a new task.
