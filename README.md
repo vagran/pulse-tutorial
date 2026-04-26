@@ -186,9 +186,11 @@ endif()
 
 You can now build the project using the following commands:
 ```bash
-cmake -DCMAKE_TOOLCHAIN_FILE=arm-clang-toolchain.cmake -B build -G "Unix Makefiles"
+cmake -DCMAKE_TOOLCHAIN_FILE=arm-clang-toolchain.cmake -DCMAKE_BUILD_TYPE=Release -B build -G "Unix Makefiles"
 cmake --build build
 ```
+You may also want to use `-DCMAKE_BUILD_TYPE=MinSizeRel` to significantly reduce program memory
+usage.
 
 ## Source code
 
