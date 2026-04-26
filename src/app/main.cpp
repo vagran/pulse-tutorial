@@ -24,7 +24,7 @@ Panic(const char *msg)
     DWT->CYCCNT = 0;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
     if (DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) {
-        /* 1 second delay. */`
+        /* 1 second delay. */
         uint32_t cycles = SystemCoreClock;
         uint32_t start = DWT->CYCCNT;
         while ((DWT->CYCCNT - start) < cycles);
@@ -161,10 +161,14 @@ constexpr uint16_t MAX_PWM = (1 << PWM_BITS) - 1;
 void
 SetPwm(uint16_t value)
 {
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-volatile"
+#ifdef __clang__
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Wdeprecated-volatile"
+#endif
     __HAL_TIM_SET_COMPARE(&hTim3, TIM_CHANNEL_1, value);
-#pragma GCC diagnostic pop
+#ifdef __clang__
+#   pragma GCC diagnostic pop
+#endif
 }
 
 uint16_t
