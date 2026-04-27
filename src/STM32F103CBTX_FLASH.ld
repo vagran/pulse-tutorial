@@ -120,16 +120,6 @@ SECTIONS
     . = ALIGN(4);
   } >FLASH
 
-  .fini_array :
-  {
-    . = ALIGN(4);
-    PROVIDE_HIDDEN (__fini_array_start = .);
-    KEEP (*(SORT(.fini_array.*)))
-    KEEP (*(.fini_array*))
-    PROVIDE_HIDDEN (__fini_array_end = .);
-    . = ALIGN(4);
-  } >FLASH
-
   /* Used by the startup to initialize data */
   _sidata = LOADADDR(.data);
 

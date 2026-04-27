@@ -162,10 +162,24 @@ The linker script defines the memory layout of the firmware (Flash, RAM, and sec
 which is essential for bare-metal embedded targets.
 
 ```cmake
-target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
+target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti -fno-unwind-tables>)
 ```
 C++ exceptions and RTTI are not used in Pulse, and are generally avoided in embedded systems due to
 their runtime overhead and binary size impact.
+
+```cmake
+target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics -fno-use-cxa-atexit>)
+```
+These options disable thread-safe initialization of static variables and avoid registering
+destructors with `atexit`, both of which are unnecessary in this embedded context.
+
+```
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(${PROJECT_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-c++-static-destructors>)
+endif()
+```
+Clang provides an explicit option to disable static destructors. Since firmware execution never
+exits, this cleanup code is effectively unused and can be safely omitted.
 
 ```cmake
 set(PULSE_PORT ARM_CM3)
