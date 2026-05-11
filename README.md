@@ -124,10 +124,10 @@ set(CMAKE_CXX_STANDARD 20)
 Pulse requires at least C++20 due to its use of coroutines.
 
 ```cmake
-add_compile_options(-mcpu=cortex-m3 -mthumb)
-add_link_options(-mcpu=cortex-m3 -mthumb)
+add_compile_options(-mcpu=cortex-m3 -mthumb -mfloat-abi=soft)
+add_link_options(-mcpu=cortex-m3 -mthumb -mfloat-abi=soft)
 ```
-These options configure the build for the Cortex-M3 target with Thumb instruction set support.
+These options configure the build for the Cortex-M3 target with Thumb instruction set support and software-based floating-point emulation.
 
 ```
 add_compile_definitions(STM32F103xB)
