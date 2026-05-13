@@ -680,7 +680,14 @@ falling edge is detected, it starts an anti-jitter (debounce) delay using a time
 ensure that the signal remains stable for the entire delay duration.
 
 A `Timer` object can itself be awaited to implement delays directly within a coroutine. Simple
-delays can also be performed using the static `Timer::Delay()` method.
+delays can also be performed using the static `Timer::Delay()` method, or even more conveniently by
+awaiting duration literals:
+```cpp
+using namespace etl::chrono_literals;
+using namespace pulse::duration_await;
+
+co_await 1_s;
+```
 
 The `Task::WhenAny()` method allows waiting on multiple awaitables simultaneously. It returns the
 index of the first awaiter that becomes ready. If you need to wait for all awaiters to complete, use
