@@ -202,9 +202,9 @@ constexpr uint16_t MIN_BRIGHTNESS =
 
 uint16_t curBrightness = MIN_BRIGHTNESS;
 // Limit indication in progress if not empty.
-pulse::Task indicateMaxTask;
+pulse::TaskRef indicateMaxTask;
 
-pulse::TaskV
+pulse::Task<>
 IndicateMaxBrightness()
 {
     LedOff();
@@ -295,7 +295,7 @@ private:
     bool lastLine = false, halfClick = false;
     pulse::InlineDiscardQueue<int8_t, true, 16> clicks;
 
-    pulse::TaskV
+    pulse::Task<>
     LineTask(bool isA);
 
     static bool
@@ -323,11 +323,11 @@ RotaryEncoder::OnLineInterrupt(bool isA)
 void
 RotaryEncoder::Initialize()
 {
-    pulse::Task::Spawn(LineTask(true), pulse::Task::HIGHEST_PRIORITY).Pin();
-    pulse::Task::Spawn(LineTask(false), pulse::Task::HIGHEST_PRIORITY).Pin();
+    pulse::tasks::Spawn(LineTask(true), pulse::tasks::HIGHEST_PRIORITY).Pin();
+    pulse::tasks::Spawn(LineTask(false), pulse::tasks::HIGHEST_PRIORITY).Pin();
 }
 
-pulse::TaskV
+pulse::Task<>
 RotaryEncoder::LineTask(bool isA)
 {
     constexpr auto JITTER_DELAY = etl::chrono::milliseconds(1);
@@ -340,7 +340,7 @@ RotaryEncoder::LineTask(bool isA)
         bool pressed = false;
         while (true) {
             jitterTimer.ExpiresAfter(JITTER_DELAY);
-            size_t idx = co_await pulse::Task::WhenAny(lineEvents, jitterTimer);
+            size_t idx = co_await pulse::tasks::WhenAny(lineEvents, jitterTimer);
             if (idx == 0) {
                 // Activated again, restart anti-jitter delay
                 continue;
@@ -402,7 +402,7 @@ RotaryEncoder::CommitClick(bool dir)
     }
 }
 
-pulse::TaskV
+pulse::Task<>
 RotaryEncoderTask()
 {
     while (true) {
@@ -416,7 +416,7 @@ RotaryEncoderTask()
             newBrightness = MIN_BRIGHTNESS;
         } else if (newBrightness > MAX_PWM) {
             newBrightness = MAX_PWM;
-            indicateMaxTask = pulse::Task::Spawn(IndicateMaxBrightness());
+            indicateMaxTask = pulse::tasks::Spawn(IndicateMaxBrightness());
         }
         curBrightness = newBrightness;
         SetPwm(CalculatePwm(curBrightness));
@@ -455,9 +455,9 @@ main()
     InitRotaryEncoder();
     rotEnc.Initialize();
 
-    pulse::Task::Spawn(RotaryEncoderTask()).Pin();
+    pulse::tasks::Spawn(RotaryEncoderTask()).Pin();
 
-    pulse::Task::RunScheduler();
+    pulse::tasks::RunScheduler();
 
     Panic("Scheduler exited");
 }

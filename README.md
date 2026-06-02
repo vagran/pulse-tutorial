@@ -606,11 +606,11 @@ The encoder initialization method creates two tasks, one for handling events fro
 void
 RotaryEncoder::Initialize()
 {
-    pulse::Task::Spawn(LineTask(true), pulse::Task::HIGHEST_PRIORITY).Pin();
-    pulse::Task::Spawn(LineTask(false), pulse::Task::HIGHEST_PRIORITY).Pin();
+    pulse::tasks::Spawn(LineTask(true), pulse::tasks::HIGHEST_PRIORITY).Pin();
+    pulse::tasks::Spawn(LineTask(false), pulse::tasks::HIGHEST_PRIORITY).Pin();
 }
 ```
-You should use `pulse::Task::Spawn()` to create a new coroutine (task). This method registers the
+You should use `pulse::tasks::Spawn()` to create a new coroutine (task). This method registers the
 task with the Pulse scheduler, and the task will be executed when the scheduler switches to the next
 ready task. Tasks are scheduled according to their priority.
 
@@ -622,7 +622,7 @@ a direct reference to it.
 
 Awaiters also generally do not keep strong references (they use weak references internally) to avoid
 reference cycles. As a result, if nothing holds the task handle, the coroutine may be destroyed
-after its first suspension point.
+either before it is even started or when reached any suspension point.
 
 To prevent this, you can either:
 - store the task handle for the lifetime of the task, or
@@ -637,7 +637,7 @@ using `Unpin()`, or preferably managed via stored handles. `Pin()` is intended f
 that run for the entire application lifetime and do not need external ownership, such as in this
 example where encoder line handlers run indefinitely:
 ```cpp
-pulse::TaskV
+pulse::Task<>
 RotaryEncoder::LineTask(bool isA)
 {
     constexpr auto JITTER_DELAY = etl::chrono::milliseconds(1);
@@ -650,7 +650,7 @@ RotaryEncoder::LineTask(bool isA)
         bool pressed = false;
         while (true) {
             jitterTimer.ExpiresAfter(JITTER_DELAY);
-            size_t idx = co_await pulse::Task::WhenAny(lineEvents, jitterTimer);
+            size_t idx = co_await pulse::tasks::WhenAny(lineEvents, jitterTimer);
             if (idx == 0) {
                 // Activated again, restart anti-jitter delay
                 continue;
@@ -671,9 +671,9 @@ RotaryEncoder::LineTask(bool isA)
     }
 }
 ```
-This is a task function, identified by its return type. `TaskV` is used for tasks that return no
-result, while `TTask<TRet>` is used when a result value is produced. Both derive from the `Task`
-base class, which represents a result-independent coroutine handle.
+This is a task function, identified by its return type. `Task<void>` or just `Task<>` is used for
+tasks that return no result, while `Task<TRet>` is used when a result value is produced. Both derive
+from the `TaskRef` base class, which represents a result-independent task handle.
 
 In this example, the task first waits for an event from the corresponding line’s token queue. Once a
 falling edge is detected, it starts an anti-jitter (debounce) delay using a timer. The goal is to
@@ -689,10 +689,11 @@ using namespace pulse::duration_await;
 co_await 1_s;
 ```
 
-The `Task::WhenAny()` method allows waiting on multiple awaitables simultaneously. It returns the
+The `tasks::WhenAny()` method allows waiting on multiple awaitables simultaneously. It returns the
 index of the first awaiter that becomes ready. If you need to wait for all awaiters to complete, use
-`Task::WhenAll()` instead. Both functions accept tasks, awaiters, or any awaitable object (i.e.
-types implementing `operator co_await`).
+`tasks::WhenAll()` instead. Both functions accept tasks, awaiters, or any awaitable object (i.e.
+types implementing `operator co_await`). You can use `tasks::SaveResult()` helper to store task
+result when used in aggregated awaiter.
 
 In this code, if the line event becomes ready first, it means the signal changed again before the
 debounce interval expired, so the delay is restarted. If the timer expires first, no new transitions
@@ -783,16 +784,16 @@ A `Task` begins execution only when it is scheduled by the Pulse scheduler. In c
 `Awaitable` starts executing immediately in a synchronous context until it reaches its first
 suspension point, at which point it suspends (unless the corresponding awaiter is already ready).
 
-The `Task::Spawn()` method accepts only `Task` types (including `TaskV` and `TTask`). In contrast,
-`Awaitable` is intended for functions that are invoked directly and may later be awaited.
+The `tasks::Spawn()` method accepts only `Task` types. In contrast, `Awaitable` is intended for
+functions that are invoked directly and may later be awaited.
 
 Here is the task that processes encoder click events:
 ```cpp
 uint16_t curBrightness = MIN_BRIGHTNESS;
 // Limit indication in progress if not empty.
-pulse::Task indicateMaxTask;
+pulse::TaskRef indicateMaxTask;
 
-pulse::TaskV
+pulse::Task<>
 RotaryEncoderTask()
 {
     while (true) {
@@ -822,7 +823,7 @@ indication task is active, further brightness adjustments are temporarily blocke
 
 The indication itself is implemented as a short LED blink:
 ```cpp
-pulse::TaskV
+pulse::Task<>
 IndicateMaxBrightness()
 {
     LedOff();
@@ -833,22 +834,22 @@ IndicateMaxBrightness()
 }
 ```
 `Timer::Delay()` is used here to implement simple timed delays within a coroutine.
-`Task::ReleaseHandle()` clears the task handle and releases its reference to the coroutine, allowing
-the system to consider the indication task finished. This, in turn, unblocks further brightness
-adjustments from encoder input.
+`TaskRef::ReleaseHandle()` clears the task handle and releases its reference to the coroutine,
+allowing the system to consider the indication task finished. This, in turn, unblocks further
+brightness adjustments from encoder input.
 
 The final step is to spawn the top-level application tasks and start the Pulse scheduler from
 `main()`:
 ```cpp
 rotEnc.Initialize();
 
-pulse::Task::Spawn(RotaryEncoderTask()).Pin();
+pulse::tasks::Spawn(RotaryEncoderTask()).Pin();
 
-pulse::Task::RunScheduler();
+pulse::tasks::RunScheduler();
 
 Panic("Scheduler exited");
 ```
-This is the typical `main()` pattern for a Pulse-based application. `Task::RunScheduler()` is
+This is the typical `main()` pattern for a Pulse-based application. `tasks::RunScheduler()` is
 expected never to return: it drives execution of all scheduled tasks according to their priorities.
 
 If no tasks are ready to run, the scheduler places the MCU into a low-power sleep state and resumes
